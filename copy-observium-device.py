@@ -46,6 +46,8 @@ class SFTPClient:
     def __init__(self) -> None:
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+    def __enter__(self) -> None:
         try:
             self.ssh_client.connect(
                 remote_observium_host, 
@@ -57,15 +59,15 @@ class SFTPClient:
             logger.error(f"Failed to connect to {remote_observium_host}: {e}")
             sys.exit(1)
     
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.sftp_client.close()
+        self.ssh_client.close() 
+    
     def put(self, local_path: str, remote_path: str) -> None:
         try:
             self.sftp_client.put(local_path, remote_path)
         except paramiko.ssh_exception.SSHException as e:
             logger.error(f"Failed to upload file to {remote_observium_host}: {e}")
-    
-    def close(self) -> None:
-        self.sftp_client.close()
-        self.ssh_client.close() 
 
 
 def list_subdirectories(path: str) -> List[str]:
@@ -124,16 +126,15 @@ def copy_rrd_data(sftp_client: SFTPClient, device_name: str, rrd_filepath: str) 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3 or sys.argv[2] not in ['0', '1']:
-        print("Usage: python copy-observium-device.py <DEVICE> <TOGGLE>")
+        print("Usage: python toggle-device-polling.py <DEVICE> <TOGGLE>")
         print("  - DEVICE: single device name or 'all' to update all devices")
         print("  - TOGGLE: 0 (enabled) or 1 (disabled)")
         sys.exit(1)
         
     toggle = ToggleState(TOGGLE)
-    sftp_client = SFTPClient()
-    rrd_filepath = "/opt/observium/rrd"
+    with SFTPClient() as sftp_client:
+        rrd_filepath = "/opt/observium/rrd"
     
-    try:
         if DEVICE_NAME.lower() == "all":
             device_id_map = get_all_device_ids()
             folders = list_subdirectories(rrd_filepath)
@@ -147,5 +148,3 @@ if __name__ == "__main__":
             updated = update_device(device_id_map.get(DEVICE_NAME), toggle)
             if updated:
                 copy_rrd_data(sftp_client, DEVICE_NAME, rrd_filepath)
-    finally:
-        sftp_client.close()
